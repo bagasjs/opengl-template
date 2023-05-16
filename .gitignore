@@ -1,0 +1,4 @@
+Makefile
+build/bin/*
+build/bin-int/*
+build/scripts/*
