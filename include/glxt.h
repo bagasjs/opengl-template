@@ -13,10 +13,10 @@
 
 #if defined(GLXT_WITH_IO_HELPER) && GLXT_WITH_IO_HELPER == 1
     #include <stdio.h>
-    size_t get_file_size(FILE* f);
-    size_t get_file_size_path(const char* file_path);
-    void read_file_data(FILE* f, char* writable);
-    void read_file_data_path(const char* file_path, char* writable);
+    size_t glxt_get_file_size(FILE* f);
+    size_t glxt_get_file_size_path(const char* file_path);
+    void glxt_read_file_data(FILE* f, char* writable);
+    void glxt_read_file_data_path(const char* file_path, char* writable);
 #endif
 
 enum {
@@ -69,6 +69,8 @@ void glxt_set_shader_uniform_mat4(uint32_t shader_program, const char* name, con
 
 #ifndef GLXT_IMPLEMENTATION
 
+#include <stdlib.h>
+#include <stdio.h>
 #include <glad/glad.h>
 
 enum {
@@ -95,7 +97,7 @@ struct {
 
 bool glxt_has_failure(void)
 {
-    return GLXT.last_failure == GLXT_NO_ERROR;
+    return GLXT.last_failure != GLXT_NO_ERROR;
 }
 
 int _glxt_check_opengl_error(void)
@@ -115,6 +117,8 @@ const char* glxt_failure_reason(void)
 {
     switch(GLXT.last_failure) {
         case GLXT_NO_ERROR: return NULL;
+        case GLXT_INVALID_NULL_ARGUMENTS: return "ERROR: Invalid null arguments";
+        case GLXT_FAILED_TO_OPEN_FILE: return "ERROR: Failed to open a file";
         case GLXT_OPENGL_INVALID_ENUM: return "ERROR: GL_INVALID_ENUM";
         case GLXT_OPENGL_INVALID_VALUE: return "ERROR: GL_INVALID_VALUE";
         case GLXT_OPENGL_INVALID_OPERATION: return "ERROR: GL_INVALID_OPERATION";
@@ -249,6 +253,14 @@ uint32_t glxt_create_shader_program(const char* vert_source, const char* frag_so
     glGetShaderiv(vert_shader, GL_COMPILE_STATUS, &is_compiled);
     if(is_compiled == GL_FALSE) {
         GLXT.last_failure = GLXT_VERTEX_SHADER_COMPILATION_FAILURE;
+        DEBUG_DO(do {
+            int error_log_length = 0;
+            glGetShaderiv(vert_shader, GL_INFO_LOG_LENGTH, &error_log_length);
+            char* err_msg = malloc(error_log_length * sizeof(char));
+            glGetShaderInfoLog(vert_shader, error_log_length, &error_log_length, err_msg);
+            fprintf(stderr, "%s\n", err_msg);
+            free(err_msg);
+        } while(0));
         glDeleteShader(vert_shader);
         return 0;
     }
@@ -262,6 +274,14 @@ uint32_t glxt_create_shader_program(const char* vert_source, const char* frag_so
     glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &is_compiled);
     if(is_compiled == GL_FALSE) {
         GLXT.last_failure = GLXT_FRAGMENT_SHADER_COMPILATION_FAILURE;
+        DEBUG_DO(do {
+            int error_log_length = 0;
+            glGetShaderiv(frag_shader, GL_INFO_LOG_LENGTH, &error_log_length);
+            char* err_msg = malloc(error_log_length * sizeof(char));
+            glGetShaderInfoLog(frag_shader, error_log_length, &error_log_length, err_msg);
+            fprintf(stderr, "%s\n", err_msg);
+            free(err_msg);
+        } while(0));
         glDeleteShader(vert_shader);
         glDeleteShader(frag_shader);
         return 0;
@@ -277,6 +297,14 @@ uint32_t glxt_create_shader_program(const char* vert_source, const char* frag_so
     glGetProgramiv(shader_program, GL_LINK_STATUS, &is_linked);
     if(is_linked == GL_FALSE) {
         GLXT.last_failure = GLXT_SHADER_PROGRAM_LINKING_FAILURE;
+        DEBUG_DO(do {
+            int error_log_length = 0;
+            glGetProgramiv(shader_program, GL_INFO_LOG_LENGTH, &error_log_length);
+            char* err_msg = malloc(error_log_length * sizeof(char));
+            glGetProgramInfoLog(shader_program, error_log_length, &error_log_length, err_msg);
+            fprintf(stderr, "%s\n", err_msg);
+            free(err_msg);
+        } while(0));
         glDeleteShader(vert_shader);
         glDeleteShader(frag_shader);
         return 0;
@@ -337,72 +365,78 @@ void glxt_set_shader_uniform_mat4(uint32_t shader_program, const char* name, con
     location = glGetUniformLocation(shader_program, name);
     if(location == -1)
         GLXT.last_failure = GLXT_UNIFORM_LOCATION_NOT_FOUND;
-    glUniformMatrix4fv(location, 1, false, data);
+    glUniformMatrix4fv(location, 1, false, (const float*)data);
     
     DEBUG_DO(_glxt_check_opengl_error());
 }
 
-#if defined(GLXT_WITH_IO_HELPER) && GLXT_WITH_IO_HELPER == 1
-    #include <stdio.h>
-
-    void read_file_data(FILE* f, char* writable)
-    {
-        if(writable == NULL) {
-            GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
-            return;
-        }
-
-        if(f == NULL) {
-            GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
-            return;
-        }
+void glxt_read_file_data(FILE* f, char* writable)
+{
+    if(writable == NULL) {
+        GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
+        return;
     }
 
-    void read_file_data_path(const char* file_path, char* writable)
-    {
-        if(writable == NULL) {
-            GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
-            return;
-        }
-
-        FILE* f = fopen(file_path, "r");
-        if(f == NULL) {
-            GLXT.last_failure = GLXT_FAILED_TO_OPEN_FILE;
-            return;
-        }
-
-        read_file_data(f, writable);
+    if(f == NULL) {
+        GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
+        return;
     }
 
-    size_t get_file_size(FILE* f)
-    {
-        if(f == NULL) {
-            GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
-            return 0;
-        }
-        size_t size = 0;
-        fseek(f, 0, SEEK_END);
-        size = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        return size;
+    size_t i = 0;
+    char c;
+    while(!feof(f)) {
+        c = fgetc(f);
+        writable[i] = c;
+        ++i;
     }
 
-    size_t get_file_size_path(const char* file_path)
-    {
-        if(file_path == NULL) {
-            GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
-            return 0;
-        }
+    fseek(f, 0, SEEK_SET);
+}
 
-        FILE* f = fopen(file_path, "r");
-        if(f == NULL) {
-            GLXT.last_failure = GLXT_FAILED_TO_OPEN_FILE;
-            return 0;
-        }
-
-        return get_file_size(f);
+void glxt_read_file_data_path(const char* file_path, char* writable)
+{
+    if(writable == NULL) {
+        GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
+        return;
     }
 
-#endif
+    FILE* f = fopen(file_path, "r");
+    if(f == NULL) {
+        GLXT.last_failure = GLXT_FAILED_TO_OPEN_FILE;
+        return;
+    }
+
+    glxt_read_file_data(f, writable);
+}
+
+size_t glxt_get_file_size(FILE* f)
+{
+    if(f == NULL) {
+        GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
+        return 0;
+    }
+    size_t size = 0;
+    fseek(f, 0, SEEK_END);
+    size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    return size;
+}
+
+size_t glxt_get_file_size_path(const char* file_path)
+{
+    if(file_path == NULL) {
+        GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
+        return 0;
+    }
+
+    FILE* f = fopen(file_path, "r");
+    if(f == NULL) {
+        GLXT.last_failure = GLXT_FAILED_TO_OPEN_FILE;
+        return 0;
+    }
+
+    return glxt_get_file_size(f);
+}
+
 
 #endif // GLXT_IMPLEMENTATION

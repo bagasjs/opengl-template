@@ -8,16 +8,26 @@
 
 #include <GLFW/glfw3.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
 #define WINDOW_TITLE "OpenGL Template"
+#define VERT_SHADER_SOURCE_PATH "./src/main.vert"
+#define FRAG_SHADER_SOURCE_PATH "./src/main.frag"
+
+#define GLXT_CHECK_ERROR() do {\
+    if(glxt_has_failure()) { \
+        fprintf(stderr, "%s\n", glxt_failure_reason()); \
+        exit(EXIT_FAILURE); \
+    } \
+} while(0)
 
 int main(int argc, char** argv)
 {
     if(!glfwInit()) {
         fprintf(stderr, "%s\n", "Failed to initialize GLFW");
-        return 0;
+        exit(EXIT_FAILURE);
     }
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -28,7 +38,7 @@ int main(int argc, char** argv)
     if(window == NULL) {
         fprintf(stderr, "%s\n", "Failed to create GLFW window");
         glfwTerminate();
-        return 0;
+        exit(EXIT_FAILURE);
     }
 
     glfwMakeContextCurrent(window);
@@ -36,6 +46,32 @@ int main(int argc, char** argv)
 
     uint32_t vao = glxt_create_vertex_array();
     glxt_enable_vertex_array(vao);
+
+    FILE* vf = fopen(VERT_SHADER_SOURCE_PATH, "r");
+    if(vf == NULL) {
+        fprintf(stderr, "%s\n", "Failed to open vertex shader source file");
+        exit(EXIT_FAILURE);
+    }
+
+    FILE* ff = fopen(FRAG_SHADER_SOURCE_PATH, "r");
+    if(vf == NULL) {
+        fprintf(stderr, "%s\n", "Failed to open fragment shader source file");
+        exit(EXIT_FAILURE);
+    }
+
+    size_t vfsize = glxt_get_file_size(vf);
+    size_t ffsize = glxt_get_file_size(ff);
+    char* vert_source = malloc(sizeof(char) * vfsize);
+    char* frag_source = malloc(sizeof(char) * ffsize);
+
+    glxt_read_file_data(vf, vert_source);
+    GLXT_CHECK_ERROR();
+
+    glxt_read_file_data(ff, frag_source);
+    GLXT_CHECK_ERROR();
+
+    uint32_t shader_program =  glxt_create_shader_program(vert_source, frag_source);
+    GLXT_CHECK_ERROR();
 
     while(!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -47,5 +83,6 @@ int main(int argc, char** argv)
 
     glfwDestroyWindow(window);
     glfwTerminate();
-    return 0;
+
+    return EXIT_SUCCESS;
 }
