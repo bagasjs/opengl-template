@@ -11,6 +11,26 @@
     #define DEBUG_DO(STMT)
 #endif
 
+#if defined(GLXT_WITH_IO_HELPER) && GLXT_WITH_IO_HELPER == 1
+    #include <stdio.h>
+    size_t get_file_size(FILE* f);
+    size_t get_file_size_path(const char* file_path);
+    void read_file_data(FILE* f, char* writable);
+    void read_file_data_path(const char* file_path, char* writable);
+#endif
+
+enum {
+    GLXT_SHADER_UNIFORM_FLOAT = 0,
+    GLXT_SHADER_UNIFORM_VEC2,
+    GLXT_SHADER_UNIFORM_VEC3,
+    GLXT_SHADER_UNIFORM_VEC4,
+    GLXT_SHADER_UNIFORM_INT,
+    GLXT_SHADER_UNIFORM_IVEC2,
+    GLXT_SHADER_UNIFORM_IVEC3,
+    GLXT_SHADER_UNIFORM_IVEC4,
+    GLXT_SHADER_UNIFORM_SAMPLER2D,
+};
+
 bool glxt_has_failure(void);
 const char* glxt_failure_reason(void);
 
@@ -36,6 +56,14 @@ void glxt_destroy_index_buffer(uint32_t ibo);
 void glxt_enable_index_buffer(uint32_t ibo);
 void glxt_disable_index_buffer(void);
 
+uint32_t glxt_create_shader_program(const char* vert_source, const char* frag_source);
+void glxt_destroy_shader_program(uint32_t shader_program);
+void glxt_enable_shader_program(uint32_t shader_program);
+void glxt_disable_shader_program(uint32_t shader_program);
+void glxt_set_shader_uniform(uint32_t shader_program, const char* name, 
+    const void* data, int uniform_type, int count);
+void glxt_set_shader_uniform_mat4(uint32_t shader_program, const char* name, const void* data);
+
 
 #endif // GLXT_H
 
@@ -45,33 +73,61 @@ void glxt_disable_index_buffer(void);
 
 enum {
     GLXT_NO_ERROR = 0,
+    GLXT_INVALID_NULL_ARGUMENTS,
     GLXT_OPENGL_INVALID_ENUM,
+    GLXT_OPENGL_INVALID_VALUE,
     GLXT_OPENGL_INVALID_OPERATION,
     GLXT_OPENGL_OUT_OF_MEMORY,
     GLXT_OPENGL_INVALID_FRAMEBUFFER_OPERATION,
+    GLXT_UNKNOWN_UNIFORM_SHADER_TYPE,
+    GLXT_UNIFORM_LOCATION_NOT_FOUND,
+    GLXT_VERTEX_SHADER_COMPILATION_FAILURE,
+    GLXT_FRAGMENT_SHADER_COMPILATION_FAILURE,
+    GLXT_SHADER_PROGRAM_LINKING_FAILURE,
+
+    GLXT_FAILED_TO_OPEN_FILE,
 };
 
 struct {
-    int last_opengl_error;
-    int last_glxt_failure;
+    int last_failure;
+    uint32_t default_shader_program;
 } GLXT = {0};
 
 bool glxt_has_failure(void)
 {
-    return GLXT.last_opengl_error == GL_NO_ERROR;
+    return GLXT.last_failure == GLXT_NO_ERROR;
+}
+
+int _glxt_check_opengl_error(void)
+{
+    switch(glGetError()) {
+        case GL_INVALID_ENUM: return GLXT_OPENGL_INVALID_ENUM;
+        case GL_INVALID_VALUE: return GLXT_OPENGL_INVALID_VALUE;
+        case GL_INVALID_OPERATION: return GLXT_OPENGL_INVALID_OPERATION;
+        case GL_OUT_OF_MEMORY: return GLXT_OPENGL_OUT_OF_MEMORY;
+        case GL_INVALID_FRAMEBUFFER_OPERATION: return GLXT_OPENGL_INVALID_FRAMEBUFFER_OPERATION;
+        default: return GLXT_NO_ERROR;
+    }
+    return GLXT_NO_ERROR;
 }
 
 const char* glxt_failure_reason(void)
 {
-    switch(GLXT.last_opengl_error) {
-        case GL_INVALID_ENUM: return "OpenGL Error detected: GL_INVALID_ENUM";
-        case GL_INVALID_VALUE: return "OpenGL Error detected: GL_INVALID_VALUE";
-        case GL_INVALID_OPERATION: return "OpenGL Error detected: GL_INVALID_OPERATION";
-        case GL_OUT_OF_MEMORY: return "OpenGL Error detected: GL_OUT_OF_MEMORY";
-        case GL_INVALID_FRAMEBUFFER_OPERATION: return "OpenGL Error detected: GL_INVALID_FRAMEBUFFER_OPERATION";
+    switch(GLXT.last_failure) {
+        case GLXT_NO_ERROR: return NULL;
+        case GLXT_OPENGL_INVALID_ENUM: return "ERROR: GL_INVALID_ENUM";
+        case GLXT_OPENGL_INVALID_VALUE: return "ERROR: GL_INVALID_VALUE";
+        case GLXT_OPENGL_INVALID_OPERATION: return "ERROR: GL_INVALID_OPERATION";
+        case GLXT_OPENGL_OUT_OF_MEMORY: return "ERROR: GL_OUT_OF_MEMORY";
+        case GLXT_OPENGL_INVALID_FRAMEBUFFER_OPERATION: return "ERROR: GL_INVALID_FRAMEBUFFER_OPERATION";
+        case GLXT_UNKNOWN_UNIFORM_SHADER_TYPE: return "ERROR: Unknown uniform shader type";
+        case GLXT_UNIFORM_LOCATION_NOT_FOUND: return "ERROR: Uniform location not found";
+        case GLXT_VERTEX_SHADER_COMPILATION_FAILURE: return "ERROR: Vertex shader compilation failure";
+        case GLXT_FRAGMENT_SHADER_COMPILATION_FAILURE: return "ERROR: Fragment shader compilation failure";
+        case GLXT_SHADER_PROGRAM_LINKING_FAILURE: return "ERROR: Shader program linking failure";
+        default: return "Invalid error code detected";
     }
-
-    return "No Error Detected";
+    return "Invalid error code detected";
 }
 
 uint32_t glxt_create_vertex_array(void)
@@ -162,6 +218,7 @@ void glxt_update_index_buffer(uint32_t ibo, size_t buffer_size, const void* buff
 {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
     glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, offset, buffer_size, buffer_data);
+
     DEBUG_DO(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0));
 }
 
@@ -179,5 +236,173 @@ void glxt_disable_index_buffer(void)
 {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
+
+uint32_t glxt_create_shader_program(const char* vert_source, const char* frag_source)
+{
+    // Create and compile the vertex shader
+    int is_compiled;
+    uint32_t vert_shader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vert_shader, 1, &vert_source, NULL);
+    glCompileShader(vert_shader);
+
+    is_compiled = 0;
+    glGetShaderiv(vert_shader, GL_COMPILE_STATUS, &is_compiled);
+    if(is_compiled == GL_FALSE) {
+        GLXT.last_failure = GLXT_VERTEX_SHADER_COMPILATION_FAILURE;
+        glDeleteShader(vert_shader);
+        return 0;
+    }
+
+    // Create and compile the fragment shader
+    uint32_t frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(frag_shader, 1, &frag_source, NULL);
+    glCompileShader(frag_shader);
+
+    is_compiled = 0;
+    glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &is_compiled);
+    if(is_compiled == GL_FALSE) {
+        GLXT.last_failure = GLXT_FRAGMENT_SHADER_COMPILATION_FAILURE;
+        glDeleteShader(vert_shader);
+        glDeleteShader(frag_shader);
+        return 0;
+    }
+
+    // Link the vertex and fragment shader into a shader program
+    uint32_t shader_program = glCreateProgram();
+    glAttachShader(shader_program, vert_shader);
+    glAttachShader(shader_program, frag_shader);
+    glLinkProgram(shader_program);
+
+    int is_linked = 0;
+    glGetProgramiv(shader_program, GL_LINK_STATUS, &is_linked);
+    if(is_linked == GL_FALSE) {
+        GLXT.last_failure = GLXT_SHADER_PROGRAM_LINKING_FAILURE;
+        glDeleteShader(vert_shader);
+        glDeleteShader(frag_shader);
+        return 0;
+    }
+
+    glDeleteShader(vert_shader);
+    glDeleteShader(frag_shader);
+
+    DEBUG_DO(_glxt_check_opengl_error());
+
+    return shader_program;
+}
+
+void glxt_destroy_shader_program(uint32_t shader_program)
+{
+    glDeleteProgram(shader_program);
+}
+
+void glxt_enable_shader_program(uint32_t shader_program)
+{
+    glUseProgram(shader_program);
+}
+
+void glxt_disable_shader_program(uint32_t shader_program)
+{
+    glUseProgram(0);
+}
+
+void glxt_set_shader_uniform(uint32_t shader_program, const char* name, 
+    const void* data, int uniform_type, int count)
+{
+    int location = -1;
+    location = glGetUniformLocation(shader_program, name);
+    if(location == -1)
+        GLXT.last_failure = GLXT_UNIFORM_LOCATION_NOT_FOUND;
+
+    switch(uniform_type)
+    {
+        case GLXT_SHADER_UNIFORM_FLOAT: glUniform1fv(location, count, (float*)data); break;
+        case GLXT_SHADER_UNIFORM_VEC2: glUniform2fv(location, count, (float*)data); break;
+        case GLXT_SHADER_UNIFORM_VEC3: glUniform3fv(location, count, (float*)data); break;
+        case GLXT_SHADER_UNIFORM_VEC4: glUniform4fv(location, count, (float*)data); break;
+        case GLXT_SHADER_UNIFORM_INT: glUniform1iv(location, count, (int*)data); break;
+        case GLXT_SHADER_UNIFORM_IVEC2: glUniform2iv(location, count, (int*)data); break;
+        case GLXT_SHADER_UNIFORM_IVEC3: glUniform3iv(location, count, (int*)data); break;
+        case GLXT_SHADER_UNIFORM_IVEC4: glUniform4iv(location, count, (int*)data); break;
+        case GLXT_SHADER_UNIFORM_SAMPLER2D: glUniform1iv(location, count, (int*)data); break;
+        default:
+            GLXT.last_failure = GLXT_UNKNOWN_UNIFORM_SHADER_TYPE;
+    }
+
+    DEBUG_DO(_glxt_check_opengl_error());
+}
+
+void glxt_set_shader_uniform_mat4(uint32_t shader_program, const char* name, const void* data)
+{
+    int location = -1;
+    location = glGetUniformLocation(shader_program, name);
+    if(location == -1)
+        GLXT.last_failure = GLXT_UNIFORM_LOCATION_NOT_FOUND;
+    glUniformMatrix4fv(location, 1, false, data);
+    
+    DEBUG_DO(_glxt_check_opengl_error());
+}
+
+#if defined(GLXT_WITH_IO_HELPER) && GLXT_WITH_IO_HELPER == 1
+    #include <stdio.h>
+
+    void read_file_data(FILE* f, char* writable)
+    {
+        if(writable == NULL) {
+            GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
+            return;
+        }
+
+        if(f == NULL) {
+            GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
+            return;
+        }
+    }
+
+    void read_file_data_path(const char* file_path, char* writable)
+    {
+        if(writable == NULL) {
+            GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
+            return;
+        }
+
+        FILE* f = fopen(file_path, "r");
+        if(f == NULL) {
+            GLXT.last_failure = GLXT_FAILED_TO_OPEN_FILE;
+            return;
+        }
+
+        read_file_data(f, writable);
+    }
+
+    size_t get_file_size(FILE* f)
+    {
+        if(f == NULL) {
+            GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
+            return 0;
+        }
+        size_t size = 0;
+        fseek(f, 0, SEEK_END);
+        size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        return size;
+    }
+
+    size_t get_file_size_path(const char* file_path)
+    {
+        if(file_path == NULL) {
+            GLXT.last_failure = GLXT_INVALID_NULL_ARGUMENTS;
+            return 0;
+        }
+
+        FILE* f = fopen(file_path, "r");
+        if(f == NULL) {
+            GLXT.last_failure = GLXT_FAILED_TO_OPEN_FILE;
+            return 0;
+        }
+
+        return get_file_size(f);
+    }
+
+#endif
 
 #endif // GLXT_IMPLEMENTATION

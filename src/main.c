@@ -3,6 +3,7 @@
  * you should include glxt and create the implentation first then you include glfw
  */
 #define GLXT_IMPLENTATION 
+#define GLXT_WITH_IO_HELPER 1
 #include "glxt.h"
 
 #include <GLFW/glfw3.h>
