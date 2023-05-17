@@ -23,6 +23,20 @@
     } \
 } while(0)
 
+typedef struct {
+    struct { float x, y; } pos;
+    struct { float r, g, b, a; } color;
+} Vertex;
+
+#define MAXIMUM_VERTICES 1000
+static Vertex vertices[MAXIMUM_VERTICES] = {
+    { .pos = { .x =  0.0f, .y =  0.5f }, .color = { 0.5f, 0.2f, 0.8f, 1.0f } },
+    { .pos = { .x = -0.5f, .y = -0.5f }, .color = { 0.2f, 0.8f, 0.5f, 1.0f } },
+    { .pos = { .x =  0.5f, .y = -0.5f }, .color = { 0.8f, 0.5f, 0.2f, 1.0f } },
+    // { .pos = { .x = 0.0f, .y = 1.0f }, .color = { 0.2f, 0.5f, 0.8f, 1.0f } },
+};
+static size_t vertices_count = 3;
+
 int main(int argc, char** argv)
 {
     if(!glfwInit()) {
@@ -73,10 +87,28 @@ int main(int argc, char** argv)
     uint32_t shader_program =  glxt_create_shader_program(vert_source, frag_source);
     GLXT_CHECK_ERROR();
 
+    uint32_t vbo = glxt_create_vertex_buffer(MAXIMUM_VERTICES, (const void*)vertices);
+    glxt_enable_vertex_buffer(vbo);
+    glxt_set_vertex_attrib(0, 2, GL_FLOAT, false, sizeof(Vertex), (const void*)offsetof(Vertex, pos));
+    glxt_set_vertex_attrib(1, 4, GL_FLOAT, false, sizeof(Vertex), (const void*)offsetof(Vertex, color));
+
+    float a = 0.0f;
+    float velocity = 0.01f;
+
     while(!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glxt_enable_shader_program(shader_program);
 
+        glxt_set_shader_uniform(shader_program, "u_random_color", 
+        (const void*)&a, GLXT_SHADER_UNIFORM_FLOAT, 1);
+
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
         glfwSwapBuffers(window);
+
+        a += velocity;
+        if(a >= 1.0f || a <= 0.0f)
+            velocity *= -1;
     }
 
     glxt_destroy_vertex_array(vao);
