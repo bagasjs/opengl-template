@@ -64,6 +64,11 @@ void glxt_set_shader_uniform(uint32_t shader_program, const char* name,
     const void* data, int uniform_type, int count);
 void glxt_set_shader_uniform_mat4(uint32_t shader_program, const char* name, const void* data);
 
+uint32_t glxt_create_texture2d(uint32_t width, uint32_t height, int comp, const uint8_t* data);
+void glxt_destroy_texture2d(uint32_t texture);
+void glxt_enable_texture2d(uint32_t texture);
+void glxt_disable_texture2d(uint32_t texture);
+
 
 #endif // GLXT_H
 
